@@ -1,0 +1,206 @@
+library(shiny)
+library(shinyjs)
+library(googlesheets4)
+library(later)
+
+# 设置 Sheet ID
+sheet_id <- "1A99R5iI3Ci6fYz9d8wHuL6gBAEUtSWU8xsSl8-8yldA"
+gs4_auth(cache = ".secrets", email = "yc4464@columbia.edu")
+
+# 通用行为记录函数
+log_event <- function(session, event_name, detail = "", version = NA, app_start_time, input) {
+  tryCatch({
+    now <- Sys.time()
+    answered_count <- sum(sapply(1:20, function(i) !is.null(input[[paste0("q", i)]])))
+    completed <- answered_count == 20
+    time_spent <- round(difftime(now, app_start_time, units = "secs"))
+    
+    log_row <- data.frame(
+      timestamp = as.character(now),
+      session_id = session$token,
+      event = event_name,
+      detail = detail,
+      version = version,
+      answered_count = answered_count,
+      completed = completed,
+      time_spent = as.numeric(time_spent),
+      stringsAsFactors = FALSE
+    )
+    
+    googlesheets4::sheet_append(sheet_id, log_row)
+  }, error = function(e) {
+    print(paste("failed:", e$message))
+  })
+}
+
+# Google Analytics Measurement ID
+GA_ID <- "G-7ME71EN9DZ"
+
+# 问题定义
+questions <- c(
+  "I enjoy being the center of attention.",
+  "I often make detailed plans before taking action.",
+  "I find it draining to be in large social gatherings.",
+  "I like trying new things, even if they’re a bit risky.",
+  "I get upset easily when things don’t go my way.",
+  "I enjoy helping others, even when it’s inconvenient.",
+  "I often reflect deeply about life and meaning.",
+  "I work best when I have a clear routine.",
+  "I find it easy to strike up a conversation with strangers.",
+  "I get anxious when I have too many tasks at once.",
+  "I prefer to listen more than I speak in group settings.",
+  "I feel energized after spending time alone.",
+  "I get excited about learning new skills or hobbies.",
+  "I keep my living and work spaces very organized.",
+  "I stay calm in stressful situations.",
+  "I’m quick to forgive people who’ve wronged me.",
+  "I enjoy being spontaneous rather than planning ahead.",
+  "I often think about how others are feeling.",
+  "I’m comfortable making decisions quickly, even under pressure.",
+  "I would describe myself as creative and imaginative."
+)
+
+examples <- c(
+  "e.g., Do you like being the one everyone is watching?",
+  "e.g., Do you write things down before acting?",
+  "e.g., Do crowds tire you out?",
+  "e.g., Are you someone who signs up for skydiving or new foods?",
+  "e.g., Do you feel annoyed when things go wrong?",
+  "e.g., Do you offer help even when it costs you time?",
+  "e.g., Do you think about the purpose of life a lot?",
+  "e.g., Do you prefer to know exactly what's coming each day?",
+  "e.g., Can you easily chat with someone in line?",
+  "e.g., Do you worry when juggling multiple tasks?",
+  "e.g., In a group, do you mostly listen instead of talk?",
+  "e.g., Do you feel refreshed after solo time?",
+  "e.g., Do new hobbies make you excited to learn?",
+  "e.g., Is your desk or room typically very tidy?",
+  "e.g., Can you stay calm when things go wrong?",
+  "e.g., Do you let things go quickly after arguments?",
+  "e.g., Do you often do things on the spur of the moment?",
+  "e.g., Do you think about others' feelings a lot?",
+  "e.g., Can you quickly decide even when rushed?",
+  "e.g., Do you love coming up with imaginative ideas?"
+)
+
+# A/B 随机版本
+version <- determine_version <- function() sample(c("A", "B"), 1)
+
+ui <- fluidPage(
+  useShinyjs(),
+  tags$head(
+    tags$script(async = NA, src = paste0("https://www.googletagmanager.com/gtag/js?id=", GA_ID)),
+    tags$script(HTML(sprintf("window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', '%s');
+      window.onscroll = function() {
+        if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight) {
+          gtag('event', 'scrolled_to_bottom', { event_category: 'Engagement' });
+        }
+      };
+      document.addEventListener('mouseover', function(e) {
+        if (e.target.closest('.well')) {
+          gtag('event', 'hover_question', {
+            event_category: 'Interaction',
+            event_label: e.target.closest('.well').innerText.slice(0,50)
+          });
+        }
+      });", GA_ID)))
+  ),
+  titlePanel("Personality Quiz"),
+  uiOutput("quiz"),
+  actionButton("submit", "Submit")
+)
+
+server <- function(input, output, session) {
+  version <- determine_version()
+  app_start_time <- Sys.time()
+  session_closed <- FALSE
+  
+  # 立即记录进入页面
+  log_event(session, "page_loaded", detail = "entry", version = version, app_start_time = app_start_time, input = input)
+  
+  # 延迟5秒记录停留
+  later(function() {
+    log_event(session, "still_on_page", detail = "after_5s", version = version, app_start_time = app_start_time, input = input)
+  }, delay = 5)
+  
+  runjs(sprintf(
+    "gtag('event', 'app_version', { 'event_category': 'A/B Test', 'event_label': 'Version %s' });",
+    version
+  ))
+  
+  output$quiz <- renderUI({
+    lapply(1:20, function(i) {
+      question_id <- paste0("q", i)
+      
+      observeEvent(input[[question_id]], {
+        runjs(sprintf(
+          "gtag('event', 'question_answered', { 'event_category': 'Question', 'event_label': 'Q%d' });",
+          i
+        ))
+      })
+      
+      if (version == "A") {
+        wellPanel(
+          class = "well",
+          style = "background-color: white; color: black;",
+          strong(paste0("Q", i, ": ", questions[i])),
+          radioButtons(question_id, label = NULL,
+                       choices = list("Yes" = "yes", "No" = "no"),
+                       selected = character(0),
+                       inline = TRUE)
+        )
+      } else {
+        wellPanel(
+          class = "well",
+          style = "background-color: #e6f7ff; color: #004d66; font-family: Comic Sans MS;",
+          tags$img(src = "https://cdn-icons-png.flaticon.com/512/744/744922.png", height = "30px"),
+          tags$h4(paste0("Q", i, ": ", questions[i])),
+          tags$em(examples[i]),
+          radioButtons(question_id, label = NULL,
+                       choices = list("Strongly Disagree" = 1, "Disagree" = 2, "Neutral" = 3,
+                                      "Agree" = 4, "Strongly Agree" = 5),
+                       selected = character(0),
+                       inline = TRUE)
+        )
+      }
+    })
+  })
+  
+  observeEvent(input$submit, {
+    session_closed <<- TRUE
+    runjs("gtag('event', 'quiz_submitted', { 'event_category': 'Quiz', 'event_label': 'Submit Clicked' });")
+    
+    answered_count <- sum(sapply(1:20, function(i) !is.null(input[[paste0("q", i)]])))
+    runjs(sprintf(
+      "gtag('event', 'questions_answered', { 'event_category': 'Quiz Progress', 'value': %d });",
+      answered_count
+    ))
+    
+    time_spent <- round(difftime(Sys.time(), app_start_time, units = "secs"))
+    runjs(sprintf(
+      "gtag('event', 'time_spent', { 'event_category': 'Engagement', 'value': %d });",
+      time_spent
+    ))
+    
+    log_event(session, "quiz_submitted", detail = "submit_clicked", version = version, app_start_time = app_start_time, input = input)
+    
+    showModal(modalDialog("Thanks for completing the quiz!", easyClose = TRUE))
+  })
+  
+  session$onSessionEnded(function() {
+    if (!session_closed) {
+      time_spent <- round(difftime(Sys.time(), app_start_time, units = "secs"))
+      runjs(sprintf(
+        "gtag('event', 'abandonment', { 'event_category': 'Exit', 'value': %d });",
+        time_spent
+      ))
+      log_event(session, "abandonment", detail = "closed_without_submit", version = version, app_start_time = app_start_time, input = input)
+    }
+  })
+}
+
+shinyApp(ui, server)
+
