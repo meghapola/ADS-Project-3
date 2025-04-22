@@ -1,0 +1,47 @@
+---
+title: "AB Testing"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+
+data = read.csv('C:\\Users\\17172\\Downloads\\43project3_data.csv')
+
+
+completion_table = table(data$version, data$completed)
+print(completion_table)
+
+
+completion_test = prop.test(completion_table)
+print(completion_test)
+
+question_answered_test = t.test(answered_count ~ version, data = data)
+print(question_answered_test)
+
+time_spent_test = t.test(time_spent ~ version, data = data)
+print(time_spent_test)
+
+completed_data = data |> filter(completed == TRUE)
+
+completed_time_spent_test = t.test(time_spent ~ version, data = completed_data)
+print(completed_time_spent_test)
+```
+
+```{r}
+
+mean_A = mean(completed_data$time_spent[completed_data$version == "A"])
+mean_B = mean(completed_data$time_spent[completed_data$version == "B"])
+sd_A = sd(completed_data$time_spent[completed_data$version == "A"])
+sd_B = sd(completed_data$time_spent[completed_data$version == "B"])
+n_A = sum(completed_data$version == "A")
+n_B = sum(completed_data$version == "B")
+
+
+pooled_sd = sqrt(((n_A - 1)*sd_A^2 + (n_B - 1)*sd_B^2) / (n_A + n_B - 2))
+
+cohen_d = (mean_B - mean_A) / pooled_sd
+
+cat("Cohen's d =", cohen_d, "\n")
+```
